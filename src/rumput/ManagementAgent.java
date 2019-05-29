@@ -33,7 +33,8 @@ public class ManagementAgent extends Agent{
     static final Base64 base64 = new Base64();
     private int threshold = 10;
     private Grass grass;
-    private LengthSensorGUI lengthGUI;
+    private LengthSensorGUI lengthGUI = null;
+    private AID cutGrassAgentAID = null;
     
     //object to string
     public String serializeObjectToString(Object object) throws IOException 
@@ -82,55 +83,105 @@ public class ManagementAgent extends Agent{
     }
     
     protected void setup(){
+        //set this agent df
+        String serviceName = "ManagementAgent";
+        
+        try {
+            DFAgentDescription dfd = new DFAgentDescription();
+            dfd.setName(getAID());
+            ServiceDescription sd = new ServiceDescription();
+            sd.setName(serviceName);
+            sd.setType(serviceName);
+            dfd.addServices(sd);
+  		
+            DFService.register(this, dfd);
+  	}
+  	catch (FIPAException fe) {
+            fe.printStackTrace();
+  	}
+        
         addBehaviour(new CyclicBehaviour(this){
             public void action(){
                 lengthGUI = LengthSensorGUI.getInstance();
+                
                 ACLMessage msg = receive();
                 
                 if(msg!=null){
+                    //get cut grass agent df
+                    try {
+                        String serviceName = "CutGrassAgent";
+
+                        // Build the description used as template for the search
+                        DFAgentDescription template = new DFAgentDescription();
+
+                        ServiceDescription templateSd = new ServiceDescription();
+                        templateSd.setName(serviceName);
+                        template.addServices(templateSd);
+
+                        SearchConstraints sc = new SearchConstraints();
+                        // We want to receive 1 results at most
+                        sc.setMaxResults(new Long(1));
+
+                        //search df
+                        DFAgentDescription[] results = DFService.search(this.myAgent, template, sc);
+
+                        if (results.length > 0) {
+                            DFAgentDescription dfd = results[0];
+                            cutGrassAgentAID = dfd.getName();
+                        } else if (lengthGUI != null) {
+                            lengthGUI.appendLog("\n[ManagementAgent] CutGrassAgent not found!");
+                        }
+                    } catch (FIPAException fe) {
+                        fe.printStackTrace();
+                    }
+                    
+                    
                     String msgContent = msg.getContent();
                     
-                    if(msg.getSender().getLocalName().equals("lsa")){ //************************msg from lsa
-                        lengthGUI.appendLog("\n[ManagementAgent] Message from lsa received");
-                        
-                        //deserialize
-                        try {
-                            grass = (Grass) deserializeObjectFromString(msgContent);
-                        } catch (Exception e) {
-                            System.out.println("[ManagementAgent] StrToObj conversion error: " + e.getMessage());
-                        }
+                    try{
+                        if (msg.getUserDefinedParameter("from").equals("lsa")) { //************************msg from lsa
+                            lengthGUI.appendLog("\n[ManagementAgent] Message from LengthSensorAgent received");
 
-                        lengthGUI.appendLog("[ManagementAgent] length => " + grass.getLength());
-                        
-                        //process if long
-                        if (grass.getLength() >= threshold) {
-                            lengthGUI.appendLog("[ManagementAgent] Grass is long.");
-                            grass.setIsLong(true);
-                            
-                            //serialize
-                            String strObj = "";
+                            //deserialize
                             try {
-                                strObj = serializeObjectToString(grass);
+                                grass = (Grass) deserializeObjectFromString(msgContent);
                             } catch (Exception e) {
-                                System.out.println("[ManagementAgent] ObjToStr conversion error: " + e.getMessage());
+                                System.out.println("[ManagementAgent] StrToObj conversion error: " + e.getMessage());
                             }
-                            
-                            //send req to cga
-                            ACLMessage send = new ACLMessage(ACLMessage.REQUEST);
-                            send.addReceiver(new AID("cga", AID.ISLOCALNAME));
-                            send.setContent(strObj);
-                            send(send);
-                        } 
-                        else {
-                            lengthGUI.appendLog("[ManagementAgent] Grass is short.");
-                            grass.setIsLong(false);
+
+                            lengthGUI.appendLog("[ManagementAgent] length => " + grass.getLength());
+
+                            //process if long
+                            if (grass.getLength() >= threshold) {
+                                lengthGUI.appendLog("[ManagementAgent] Grass is long.");
+                                grass.setIsLong(true);
+
+                                //serialize
+                                String strObj = "";
+                                try {
+                                    strObj = serializeObjectToString(grass);
+                                } catch (Exception e) {
+                                    System.out.println("[ManagementAgent] ObjToStr conversion error: " + e.getMessage());
+                                }
+
+                                //send req to cga
+                                ACLMessage send = new ACLMessage(ACLMessage.REQUEST);
+                                send.addReceiver(cutGrassAgentAID);
+                                send.setContent(strObj);
+                                send(send);
+                            } else {
+                                lengthGUI.appendLog("[ManagementAgent] Grass is short.");
+                                grass.setIsLong(false);
+                            }
+                        } else if (msg.getUserDefinedParameter("from").equals("cga")) { //************************msg from cga
+                            Grass.cutting = false;
+                            lengthGUI.appendLog("\n[ManagementAgent] Message from CutGrassAgent received");
+                            lengthGUI.appendLog("[ManagementAgent] Cut finished");
+                        } else if (msg.getUserDefinedParameter("from").equals("wsa")) {
                         }
                     }
-                    else if(msg.getSender().getLocalName().equals("cga")){ //************************msg from cga
-                        Grass.cutting = false;
+                    catch(Exception e){
                         
-                        lengthGUI.appendLog("\n[ManagementAgent] Message from cga received");
-                        lengthGUI.appendLog("[ManagementAgent] Cut finished");
                     }
                 }
                 else{

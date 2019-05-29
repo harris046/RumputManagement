@@ -33,7 +33,8 @@ import org.apache.commons.codec.binary.Base64;
 public class CutGrassAgent extends Agent{
     static final Base64 base64 = new Base64();
     private Grass grass;
-    private LengthSensorGUI lengthGUI;
+    private LengthSensorGUI lengthGUI = null;
+    private AID managementAgentAID = null;
     
     //object to string
     public String serializeObjectToString(Object object) throws IOException 
@@ -82,13 +83,61 @@ public class CutGrassAgent extends Agent{
     }
        
     protected void setup(){
+        //set this agent df
+        String serviceName = "CutGrassAgent";
+        
+        try {
+            DFAgentDescription dfd = new DFAgentDescription();
+            dfd.setName(getAID());
+            ServiceDescription sd = new ServiceDescription();
+            sd.setName(serviceName);
+            sd.setType(serviceName);
+            dfd.addServices(sd);
+  		
+            DFService.register(this, dfd);
+  	}
+  	catch (FIPAException fe) {
+            fe.printStackTrace();
+  	}
+        
         addBehaviour(new CyclicBehaviour(this){
             public void action(){
                 lengthGUI = LengthSensorGUI.getInstance();
+                
                 ACLMessage msg = receive();
                 
                 if(msg!=null){
-                    lengthGUI.appendLog("\n[CutGrassAgent] Message from ma received");
+                    //get management agent df
+                    try {
+                        String serviceName = "ManagementAgent";
+//            String serviceType = "";
+
+                        // Build the description used as template for the search
+                        DFAgentDescription template = new DFAgentDescription();
+
+                        ServiceDescription templateSd = new ServiceDescription();
+                        templateSd.setName(serviceName);
+                        template.addServices(templateSd);
+
+                        SearchConstraints sc = new SearchConstraints();
+                        // We want to receive 1 results at most
+                        sc.setMaxResults(new Long(1));
+
+                        //search df
+                        DFAgentDescription[] results = DFService.search(this.myAgent, template, sc);
+
+                        if (results.length > 0) {
+                            DFAgentDescription dfd = results[0];
+                            managementAgentAID = dfd.getName();
+                        } else {
+//                        if(lengthGUI!=null) lengthGUI.appendLog("\n[CutGrassAgent] ManagementAgent not found!");
+                        }
+                    } catch (FIPAException fe) {
+                        fe.printStackTrace();
+                    }
+                    
+                    
+                    lengthGUI.appendLog("\n[CutGrassAgent] Message from ManagementAgent received");
                     String msgContent = msg.getContent();
                     
                     //deserialize
@@ -119,7 +168,8 @@ public class CutGrassAgent extends Agent{
                             
                             //send req to cga
                             ACLMessage send = new ACLMessage(ACLMessage.INFORM);
-                            send.addReceiver(new AID("ma", AID.ISLOCALNAME));
+                            send.addUserDefinedParameter("from", "cga");
+                            send.addReceiver(managementAgentAID);
                             send.setContent(strObj);
                             send(send);
                         }
@@ -131,6 +181,7 @@ public class CutGrassAgent extends Agent{
                 else{
                     block();
                 }
+                
             }
         });
     }

@@ -33,6 +33,7 @@ import org.apache.commons.codec.binary.Base64;
 public class LengthSensorAgent extends Agent{
     private LengthSensorGUI lengthGUI;
     static final Base64 base64 = new Base64();
+    private AID managementAgentAID = null;
     
     //object to string
     public String serializeObjectToString(Object object) throws IOException 
@@ -84,11 +85,59 @@ public class LengthSensorAgent extends Agent{
     protected void setup(){
         lengthGUI = LengthSensorGUI.getInstance(this);
 	lengthGUI.showGui();
+        
+        //set this agent df
+        String serviceName = "LengthSensorAgent";
+        
+        try {
+            DFAgentDescription dfd = new DFAgentDescription();
+            dfd.setName(getAID());
+            ServiceDescription sd = new ServiceDescription();
+            sd.setName(serviceName);
+            sd.setType(serviceName);
+            dfd.addServices(sd);
+  		
+            DFService.register(this, dfd);
+  	}
+  	catch (FIPAException fe) {
+            fe.printStackTrace();
+  	}
     }
     
     public void sendLength(int len){        
         Grass grass = new Grass();
         grass.setLength(len);
+        
+        //get management agent df
+        try{
+            String serviceName = "ManagementAgent";
+//            String serviceType = "";
+
+            // Build the description used as template for the search
+            DFAgentDescription template = new DFAgentDescription();
+
+            ServiceDescription templateSd = new ServiceDescription();
+            templateSd.setName(serviceName);
+            template.addServices(templateSd);
+
+            SearchConstraints sc = new SearchConstraints();
+            // We want to receive 1 results at most
+            sc.setMaxResults(new Long(1));
+            
+            //search df
+            DFAgentDescription[] results = DFService.search(this, template, sc);
+            
+            if(results.length > 0){
+                DFAgentDescription dfd = results[0];
+                managementAgentAID = dfd.getName();
+            }
+            else{
+                //lengthGUI.appendLog("\n[LengthSensorAgent] MangementAgent not found!");
+            }
+        }
+        catch(FIPAException fe){
+            fe.printStackTrace();
+        }
         
         String strObj = "";
         
@@ -103,10 +152,11 @@ public class LengthSensorAgent extends Agent{
         }
         
         ACLMessage msg = new ACLMessage(ACLMessage.INFORM);
+        msg.addUserDefinedParameter("from", "lsa");
         msg.setContent(strObj);
 
         //send to ManagementAgent
-        msg.addReceiver(new AID("ma", AID.ISLOCALNAME));
+        msg.addReceiver(managementAgentAID);
         send(msg);
     }
 }
